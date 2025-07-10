@@ -1,0 +1,586 @@
+---
+title: 'Case Study: Emergency Room Utilization Patterns'
+author: "Marina Melendez Rowe-Anderson"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Introduction
+
+This is my Case Study project as the final requirement for my Google
+Data Analytics Certificate. The aim of this project is to put the skills
+I've gained to practice (i.e. Using R, Creating an RMakrdown file, Using
+ggplot2 to create graphs, etc.).
+
+This Case Study will answer the Business Task: Determine if ER usage
+differs significantly by **race**, **ethnicity** or **insurance status**
+to inform equity-focused policy decisions.
+
+To answer the Business Task I will be analyzing data that comes from the
+2022 National Hospital Ambulatory Medical Care Survey (NHAMCS). In order
+to gain more information on the data visit the website below:
+<https://www.cdc.gov/nchs/nhamcs/documentation/index.html>.
+
+# Data Import
+
+```{r}
+#The data format on  the website was either SAS, SPSS, or Stata, so I selected SAS.
+
+library(haven)
+
+ed2022_sas <- read_sas("C:/Users/hueyr/Downloads/ed2022_sas.zip", NULL)
+View(ed2022_sas)
+```
+
+# Cleaning the Data
+
+```{r}
+#Loading Packages
+library(dplyr)
+library(tidyverse)
+
+#Filtering the Dataset to the Variables I Need and Turning -7 and -9 to N/A
+ed2022_condensed <- ed2022_sas %>% 
+  select(WAITTIME, LOV, AGE, AGEDAYS, RESIDNCE, SEX, ETHUN, RACEUN, RACERETH, PAYTYPER, IMMEDR,
+         EMRED, REGION, MSA) %>% 
+  mutate(across(
+    .cols = c(WAITTIME, LOV, AGEDAYS),
+    .fns = ~ifelse(.x %in% c(-7, -9), NA, .x)
+  ))
+
+#Recoding the Variables (from Numbers to Values)
+ed2022_condensed$RESIDNCE <- factor(ed2022_condensed$RESIDNCE,
+                                    levels = c(-9, -8, 1, 2, 3, 4),
+                                    labels = c("Blank", "Unknown", "Private Residence", 
+                                               "Nursing Home",
+                                               "Homeless/Homeless Shelter", "Other"))
+ed2022_condensed$SEX <- factor(ed2022_condensed$SEX,
+                               levels = c(1, 2),
+                               labels = c("Female", "Male"))
+ed2022_condensed$ETHUN <- factor(ed2022_condensed$ETHUN,
+                                 levels = c(-9, 1, 2),
+                                 labels = c("Blank", "Hispanic or Latino", "Not Hispanic or Latino"))
+ed2022_condensed$RACEUN <- factor(ed2022_condensed$RACEUN,
+                                  levels = c(-9, 1, 2, 3, 4, 5, 6),
+                                  labels = c("Blank", "White", "Black/African American", "Asian",
+                                             "Native Hawaiian/Other Pacific Islander", 
+                                             "American Indian/Alaska Native", 
+                                             "More than one race reported"))
+ed2022_condensed$RACERETH <- factor(ed2022_condensed$RACERETH,
+                                    levels = c(1, 2, 3, 4),
+                                    labels = c("Non-Hispanic White", "Non-Hispanic Black", "Hispanic",
+                                               "Non-Hispanic Other"))
+ed2022_condensed$PAYTYPER <- factor(ed2022_condensed$PAYTYPER,
+                                     levels = c(-9, -8, 1, 2, 3, 4, 5, 6, 7),
+                                     labels = c("Blank", "Unknown", "Private insurance","Medicare",
+                                                "Medicaid or CHIP*",
+                                                "Worker’s compensation", "Self-pay", 
+                                                "No charge/Charity", "Other"))
+ed2022_condensed$EMRED <- factor(ed2022_condensed$EMRED,
+                                 levels = c(-9, -8, 1, 2, 3),
+                                 labels = c("Blank", "Unknown", "Yes, all electronic", 
+                                            "Yes, part paper and part electronic", "No"))
+ed2022_condensed$MSA <- factor(ed2022_condensed$MSA,
+                               levels = c(1, 2),
+                               labels = c("MSA", "Non-MSA"))
+ed2022_condensed$REGION <- factor(ed2022_condensed$REGION,
+                                  levels = c(1, 2, 3, 4),
+                                  labels = c("Northeast", "Midwest", "South", "West"))
+ed2022_condensed$IMMEDR <- factor(ed2022_condensed$IMMEDR,
+                                  levels = c(-9, -8, 0, 1, 2, 3, 4, 5, 7),
+                                  labels = c("Blank", "Unknown", "No triage",
+                                             "Immediate", "Emergent", "Urgent",
+                                             "Semi-urgent", "Nonurgent", 
+                                             "ESA No triage"))
+```
+
+# Inspecting the Data and Further Cleaning
+
+**Note 1:** The condensed data set is showing 35 dupes however when I
+cross-reference with the original data set the "dupes" have different
+responses for the variables I didn't choose to include in my condensed
+data set.
+
+**Note 2:** The continuous variables (i.e. wait time and length of visit)
+have multiple rows of data. For this reason, I'm going to aggregate the
+data in the groups (i.e. race -\> White, Black,etc.) so I can get an
+average for each category and observe any patterns based on the groups.
+
+**Note 3:** In order to determine which measure of central tendency to use for this project, I'm going to find out the distribution of the following variables (Length of Visit and Wait Time). If the data is symmetrical I will calculate using the mean and if it's asymmetrical/skewed I will calculate using the median.
+```{r}
+#Remving the Blanks and N/A from the Dataset
+ed2022_noblanks <- ed2022_condensed %>% 
+  filter(PAYTYPER != "Blank", RACEUN != "Blank", IMMEDR != "Blank", 
+         WAITTIME != "NA", LOV != "NA") %>% 
+  droplevels()
+```
+
+```{r}
+#Determining Which Measure of Central Tendency to Use for Wait Time
+hist(ed2022_noblanks$WAITTIME, probability = TRUE, main = "Histogram With Density Curve", breaks = 75, xlab = "Wait Time (min)")
+lines(density(ed2022_noblanks$WAITTIME), col = "red", lwd = 2)
+
+#Note: The Wait Time variable is asymmetrically right skewed; therefore, I will use median as a measure of central tendency.
+```
+```{r}
+#Determining Which Measure of Central Tendency to Use for Length of Visit
+hist(ed2022_noblanks$LOV, probability = TRUE, main = "Histogram With Density Curve", breaks = 75, xlab = "Length of Visit (min)")
+lines(density(ed2022_noblanks$LOV), col = "blue", lwd = 2)
+
+#Note: The Length of Visit variable is asymmetrically right skewed; therefore, I will use median as a measure of central tendency.
+```
+
+```{r}
+#Loading Packages
+install.packages("summarytools")
+library(summarytools)
+install.packages("janitor")
+library(janitor)
+
+#Creating Frequency Tables to Observe Percentage of Missing/Blank Data
+stview(dfSummary(ed2022_noblanks))
+
+#Identifying Duplicates
+dupes_og <- get_dupes(ed2022_sas) #the original data set shows no dupes 
+dupes_ed2022 <- get_dupes(ed2022_noblanks) #the condensed data set shows 35 dupes
+
+#Averaging Continuous Data (EX: Wait Time and Length of Visit) 
+#Wait Time Average x Insurance Status 
+avgwait_insurance <- ed2022_noblanks %>% 
+  group_by(PAYTYPER) %>% 
+  summarize(avg_wait = median(WAITTIME, na.rm = TRUE))
+
+#Wait Time Average x Race
+avgwait_race <- ed2022_noblanks %>% 
+  group_by(RACEUN) %>% 
+  summarize(avg_wait = median(WAITTIME, na.rm = TRUE))
+
+#Wait Time Average x Ethnicity 
+avgwait_ethn <- ed2022_noblanks %>% 
+  group_by(RACERETH) %>% 
+  summarize(avg_wait = median(WAITTIME, na.rm = TRUE))
+
+#Wait Time Average X Immediacy to be Seen
+avgwait_immmediacy <- ed2022_noblanks %>% 
+  group_by(IMMEDR) %>% 
+  summarize(avg_wait = median(WAITTIME, na.rm = TRUE))
+
+#Length of Visit Average x Insurance Status 
+avglov_insurance <- ed2022_noblanks %>% 
+  group_by(PAYTYPER) %>% 
+  summarize(avg_lov = median(LOV, na.rm = TRUE))
+
+#Length of Visit Average x Insurance Status 
+avglov_race <- ed2022_noblanks %>% 
+  group_by(RACEUN) %>% 
+  summarize(avg_lov = median(LOV, na.rm = TRUE))
+
+#Length of Visit Average x Ethnicity 
+avglov_ethnicity <- ed2022_noblanks %>% 
+  group_by(RACERETH) %>% 
+  summarize(avg_lov = median(LOV, na.rm = TRUE))
+
+#Length of Visit Average x Immediacy to be Seen 
+avglov_immediacy <- ed2022_noblanks %>% 
+  group_by(IMMEDR) %>% 
+  summarize(avg_lov = median(LOV, na.rm = TRUE))
+```
+
+# Analysis
+
+Reminder of the **Business Task**: Determine if ER usage differs
+significantly by **race**, **ethnicity** or **insurance status** to
+inform equity-focused policy decisions.
+
+What Will Be Considered ER Usage: 
+- Wait Time (WAITTIME) 
+- Length of Visit (LOV)
+
+Variables Being Observed: 
+- Insurance Status (PAYTYPER) 
+- Race (RACEUN) 
+- Ethnicity (RACERETH) 
+- Immediacy With Which Patient Should Be Seen (IMMEDR)
+
+## 1. Exploratory Data Analysis 
+For the *Exploratory Data* analysis, I will create graphs using ggplot2 to graph and visualize how the independent variables (Insurance Status, Race, Ethnicity and Immediacy With Which Patient Should Be Seen) are influenced by the dependent variables (Wait Time, Length of Visit) and to see what trends I identify (i.e. one race has a higher Wait Time than Expected or compared to another race). This section will also demonstrate my skills in using ggplot2 and creating graphs in R.
+
+```{r}
+#Loading Packages
+install.packages("scales")
+install.packages("gridExtra")
+library(ggplot2)   #creates graphs
+library(scales)    #helps scale the x-axis for readability
+library(gridExtra) #combines more than one graph together
+
+#Wait Time x Insurance Status
+wait_insurance <- ggplot(avgwait_insurance, aes(x = reorder(PAYTYPER, -avg_wait), y = avg_wait))+
+  geom_bar(stat = "identity", fill = "skyblue4")+
+  ggtitle("ER Wait Time by Insurance Status")+
+  geom_text(aes(label = avg_wait), vjust = -0.4)+
+  labs(x = "Insurance Status", y = "Average Wait Time (min)", 
+       caption = "*Medicaid or CHIP or other state-based program")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Wait Time x Race
+wait_race <- ggplot(avgwait_race, aes(x = reorder(RACEUN, -avg_wait), y = avg_wait))+
+  geom_bar(stat = "identity", fill = "skyblue3")+
+  ggtitle("ER Wait Time by Race")+
+  geom_text(aes(label = avg_wait), vjust = -0.4)+
+  labs(x = "Race", y = "Average Wait Time (min)")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Wait Time x Ethnicity
+wait_ethn <- ggplot(avgwait_ethn, aes(x = reorder(RACERETH, -avg_wait), y = avg_wait))+
+  geom_bar(stat = "identity", fill = "skyblue2")+
+  ggtitle("ER Wait Time by Ethnicity")+
+  geom_text(aes(label = avg_wait), vjust = -0.4)+
+  labs(x = "Ethnicity", y = "Average Wait Time (min)")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Wait Time x Immediacy to be Seen 
+wait_immediacy <- ggplot(avgwait_immmediacy, aes(x = reorder(IMMEDR, -avg_wait), y = avg_wait))+
+  geom_bar(stat = "identity", fill = "skyblue1")+
+  ggtitle("ER Wait Time by Immediacy to be Seen")+
+  geom_text(aes(label = avg_wait), vjust = -0.4)+
+  labs(x = "Immediacy to be Seen", y = "Average Wait Time (min)")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Wait Time Graphs
+grid.arrange(wait_insurance, wait_race, wait_ethn, wait_immediacy)
+
+#Length of Visit x Insurance Status 
+lov_insurance <- ggplot(avglov_insurance, aes(x = reorder(PAYTYPER, -avg_lov), y = avg_lov))+
+  geom_bar(stat = "identity", fill = "palegreen4")+
+  ggtitle("ER Length of Visit by Insurance Status")+
+  geom_text(aes(label = round(avg_lov, 0), vjust = -0.4))+
+  labs(x = "Insurance Status", y = "Average Length of Visit (min)", 
+       caption = "*Medicaid or CHIP or other state-based program")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Length of Visit x Race 
+lov_race <- ggplot(avglov_race, aes(x = reorder(RACEUN, -avg_lov), y = avg_lov))+
+  geom_bar(stat = "identity", fill = "palegreen3")+
+  ggtitle("ER Length of Visit by Race")+
+  geom_text(aes(label = round(avg_lov, 0), vjust = -0.4))+
+  labs(x = "Race", y = "Average Length of Visit (min)")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Length of Visit x Ethnicity
+lov_ethn <- ggplot(avglov_ethnicity, aes(x = reorder(RACERETH, -avg_lov), y = avg_lov))+
+  geom_bar(stat = "identity", fill = "palegreen2")+
+  ggtitle("ER Length of Visit by Ethnicity")+
+  geom_text(aes(label = round(avg_lov, 0), vjust = -0.4))+
+  labs(x = "Ethnicity", y = "Average Length of Visit (min)")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Length of Visit x Immediacy to be Seen
+lov_immediacy <- ggplot(avglov_immediacy, aes(x = reorder(IMMEDR, -avg_lov), y = avg_lov))+
+  geom_bar(stat = "identity", fill = "palegreen1")+
+  ggtitle("ER Length of Visit by Immediacy to be Seen")+
+  geom_text(aes(label = round(avg_lov, 0), vjust = -0.4))+
+  labs(x = "Immediacy to be Seen", y = "Average Length of Visit (min)")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))+
+  scale_x_discrete(labels = label_wrap(10))
+
+#Length of Visit Graphs
+grid.arrange(lov_insurance, lov_race, lov_ethn, lov_immediacy)
+```
+
+## 2. Statistical Data Analysis
+
+For the *Statistical Data* analysis, I will conduct a Chi-Square Test of
+Independence to explore the relationship between some of the categorical
+variables (i.e. race and the immediacy in which a patient is seen) to
+see if there's a statistically significant difference between the
+variables. I will first create a contingency table to show how the
+values are distributed and then conduct the Chi-Square Test. Lastly, I
+will find the Pearson Residual's and plot it in a Correlation Plot table
+to see which variables have a positive versus negative correlation in
+hopes of answering the Business Task.
+
+```{r}
+#Loading Packages
+install.packages("gplot")
+library(gplot)     #Used to create the balloon plot contingency tables 
+install.packages("corrplot")
+library(corrplot)  #Used to create the plotting of the pearson residuals
+install.packages("patchwork") #combines more than one graph together
+library(patchwork)
+
+##CHI-SQUARE TEST
+#Race x Insurance Status (1. Contingency Table, 2. Chi-Square Test, 3. Pearson Residuals)
+#1.Contingency Table
+test <- table(ed2022_noblanks$PAYTYPER, ed2022_noblanks$RACEUN) 
+print(test)
+
+balloonplot(test, main = "Race x Insurance Status", show.margins = FALSE, text.size = 0.5)
+
+#2.Chi-Square Test
+r_is <- chisq.test(test)
+r_is
+
+#3. Pearson Residuals 
+pearson_residuals <- r_is$residuals
+print(round(pearson_residuals, 2))
+
+corrplot(r_is$residuals, is.corr = FALSE)
+
+#Ethnicity x Insurance Status
+#1.Contingency Table
+eXi <- table(ed2022_noblanks$PAYTYPER, ed2022_noblanks$RACERETH)
+print(eXi)
+
+balloonplot(eXi, main = "Ethnicity x Insurance Status", show.margins = FALSE, text.size = 0.4)
+
+#2.Chi-Square Test
+e_is <- chisq.test(eXi)
+e_is
+
+#3. Pearson Residuals 
+pearson_residuals_eis <- e_is$residuals
+print(round(pearson_residuals_eis, 2))
+
+corrplot(e_is$residuals, is.corr = FALSE)
+
+#Immediacy to be Seen x Insurance Status
+#1.Contingency Table
+iXi <- table(ed2022_noblanks$PAYTYPER, ed2022_noblanks$IMMEDR)
+print(iXi)
+
+balloonplot(iXi, main = "Insurance Status x Immediacy to be Seen", show.margins = FALSE, text.size = 0.4)
+
+#2.Chi-Square Test
+imm_is <- chisq.test(iXi)
+imm_is
+
+#3. Pearson Residuals 
+pearson_residuals_immis <- imm_is$residuals
+print(round(pearson_residuals_immis, 2))
+
+corrplot(imm_is$residuals, is.corr = FALSE)
+#Immediacy to be Seen x Race
+#1.Contingency Table
+rXi <- table(ed2022_noblanks$RACEUN, ed2022_noblanks$IMMEDR)
+print(rXi)
+
+balloonplot(rXi, main = "Race x Immediacy to be Seen", show.margins = FALSE, text.size = 0.4)
+
+#2.Chi-Square Test
+race_is <- chisq.test(rXi)
+race_is
+
+#3. Pearson Residuals 
+pearson_residuals_raceis <- race_is$residuals
+print(round(pearson_residuals_raceis, 2))
+
+corrplot(race_is$residuals, is.corr = FALSE)
+
+#Immediacy to be Seen x Ethnicity
+#1.Contingency Table
+ethXi <- table(ed2022_noblanks$RACERETH, ed2022_noblanks$IMMEDR)
+print(ethXi)
+
+balloonplot(ethXi, main = "Ethnicity x Immediacy to be Seen", show.margins = FALSE, text.size = 0.4)
+
+#2.Chi-Square Test
+eth_imm <- chisq.test(ethXi)
+eth_imm
+
+#3. Pearson Residuals 
+pearson_residuals_ethimm <- eth_imm$residuals
+print(round(pearson_residuals_ethimm, 2))
+
+corrplot(eth_imm$residuals, is.corr = FALSE, title = "Ethnicity x Immediacy to be Seen", cex.main = 0.7)
+
+```
+
+# Results and Answering the Buisness Task
+
+The purpose of this Case Study was to use the 2022 NHAMCS data set to
+answer the Business Task: Determine if ER usage differs significantly by
+**race**, **ethnicity** or **insurance status** to inform equity-focused
+policy decisions. The below will delve into the results I garnered from
+the analysis and then will discuss the implications of the findings.
+
+## 1. Overview of Variables Analyzed
+
+-   Created Bar Graphs Observing the relationship between ER Usage (Wait
+    Time, Length of Visit) and the independent variables (Race,
+    Ethnicity, Insurance Status, and Immediacy in Which Patient is
+    Seen).
+-   Conducted a Chi-Square to assess the significance of the independent
+    variables (Race, Ethnicity, Insurance Status, and Immediacy in Which
+    Patient is Seen).
+-   Conducted a Pearson Residual to observe the strength of association
+    between the variables.
+
+## 2. Bar Chart Findings 
+
+```{r}
+#The Averages Calculated below will be used as a baseline to identify variables that are abnormally high or low. 
+#Average Wait Time (15 minutes)
+avg <- median(ed2022_noblanks$WAITTIME, na.rm = TRUE)
+round(avg, digits = 0)
+
+#Average Length of Visit (192 minutes)
+avg_lov <- median(ed2022_noblanks$LOV, na.rm = TRUE)
+round(avg_lov, digits = 0)
+```
+-   ER Wait Time by Insurance Status: The overall median ER wait time
+    was 15 minutes. Patients that weren't charged or paid by charity had
+    a higher wait time than average of 35 minutes. Patients who had an
+    Unknown (18 minutes), Private (16 minutes), or Medicaid/CHIP (15 minutes), 
+    Self-Pay (15 minutes) as their insurance status also had higher wait times.
+
+```{r}
+#Bar Graph: Average Wait x Insurance Status
+print(wait_insurance)
+```
+
+-   ER Wait Time by Race: The overall median ER wait time was 15
+    minutes. American Indian/Alaskan Native, Asian and Black/American patients
+    experienced the longest delays with a wait time of 16 minutes. This may suggest a
+    disparity in how certain patients are triaged upon arriving to the ER.
+
+```{r}
+#Bar Graph: Average Wait x Race
+print(wait_race)
+```
+
+-   ER Wait Time by Ethnicity: The overall median ER wait time was 15
+    minutes. Patients that were Non-Hispanic Black had the highest wait
+    time at 16 minutes. Non-Hispanic Other patients had a wait time of
+    exactly 15 minutes.
+
+```{r}
+#Bar Graph: Average Wait x Ethnicity
+print(wait_ethn)
+```
+
+-   ER Wait Time by Immediacy: The overall median ER wait time was 15
+    minutes. Patients who weren't triaged upon arrival or who were in an
+    Emergency Service Area (ESA) that doesn't conduct nursing triage
+    to the hospital had the highest wait time at 18 minutes. Patients who needed
+    to be seen urgently or semi-urgent had a wait time of exactly 15 minutes.
+
+```{r}
+#Bar Graph: Average Wait x Race
+print(wait_immediacy)
+```
+
+-   Length of Visit by Insurance Status: The overall median ER length of visit was 192 minutes (or 3 hours and 20 minutes). Medicare patients had the longest ER length of visit of 241 minutes (about 4 hours). Patients that had an Unknown insurance (200 minutes or about 3.5 hours) provider and patients who had their insurance listed as other (195 minutes or about 3.25 hours) also stayed at the ER for longer than the median amount of time.
+
+```{r}
+#Bar Graph: Length of Visit x Insurance Status
+print(lov_insurance)
+grid.arrange(lov_insurance, lov_race, lov_ethn, lov_immediacy)
+```
+- Length of Visit by Race: The overall median ER length of visit was 192 minutes (or 3 hours and 20 minutes). Asian patients had the highest median ER length of visit of 233 minutes. American Indian/Alaskan Native patients (222 minutes) and Black/African American patients (194 minutes) also had high lengths of visits. 
+```{r}
+#Bar Graph: Length of Visit x Race
+print(lov_race)
+```
+- Length of Visit By Ethnicity: The overall median ER length of visit (LOV) was 192 minutes (or 3 hours and 20 minutes). Non-Hispanic Other patients have the highest ER length of visit of 215 minutes. Hispanic patients (201 minutes) and Non-Hispanic Black patients (195 minutes) also had ER length of visits that were above the median ER length of visit.
+```{r}
+#Bar Graph: Length of Visit x Ethnicity
+print(lov_ethn)
+```
+- Length of Visit by Immediacy: The overall median ER length of visit (LOV) was 192 minutes (or 3 hours and 20 minutes). Patients that have to be seen immediately had the highest length of visit at the ER of 299 minutes. Patients that had an emergent immediacy (284 minutes) listed or an urgent immediacy (222 minutes) also had lengths of visit that were above the median.
+```{r}
+#Bar Graph: Length of Visit x Immediacy to be Seen
+print(lov_immediacy)
+```
+
+## 3. Chi-Square and Pearson Residual Findings 
+**Association by Race and Insurance Status:**
+- This Chi-Square test was conducted to observe the association between a patients race
+and their insurance status. For the interpretation of the p-value, I will use the common significance level of 0.05 for this example and all the examples to follow as the level for determining if the variables have an association or not. The results revealed a significant relationship between race and insurance status, Χ2 (35, N = 10,695) = 531.54, p = < 2.2e-16. 
+- From the above, we know that there's a significant relationship but the Pearson Residual test will help determine which specific race and insurance status have observed values that are either higher or lower than the model's prediction. When analyzing a Pearson Residual, it's important to consider if the residual is positive/negative and how close or far the value is from 0. If the residual is positive (blue circles) and far from the number zero that means that the observed count is higher than expected and if the residual is negative (red circles) and far from zero that means the observed count is lower than expected. For the purpose of answering the Business Task, I'm going to focus on the residuals that are the most polarizing, since those may indicate strong areas where ER usage differs between groups and where interventions need to be focused.
+  - Black/African American patients had a strong positive pearson residual of 12.09 when looking at their usage of Medicaid/CHIP. This reveals that they're over represented in their usage of Medicaid/CHIP, which may highlight an area where equity interventions can be focused.
+  - On the other hand, Black/African American patients had a strong negative pearson residual of -9.26 when looking at their usage of private insurance and a residual of -7.53 when looking at their usage of Medicare. This suggests that they're underrepresented in their reliance on private insurance and Medicare, which may be due to not having jobs that offer private insurance.
+  - For white and Asian patients, they both had a strong positive pearson residual of 5.46 for White patients and 3.74 for Asian patients when looking at their usage of private insurance which shows that they're heavily reliant on private insurance.
+  - White patients had a strong negative pearson residual of -7.78 when looking at their usage of Medicaid/CHIP. This indicates that they're less reliant on Medicaid/CHIP compared to other races. 
+```{r}
+#Chi-Square: Race x Insurance Status
+r_is <- chisq.test(test)
+r_is
+
+#Pearson Residuals: Race x Insurance Status
+pearson_residuals <- r_is$residuals
+print(round(pearson_residuals, 2))
+
+corrplot(r_is$residuals, is.corr = FALSE)
+```
+**Association by Ethnicity and Insurance Status:**
+- This Chi-Square test was conducted to observe the association between a patients ethnicity and their insurance status. The results revealed a significant relationship between ethnicity and insurance status, Χ2 (21, N = 10,695) = 860.57, p = < 2.2e-16. 
+- Similar to above, I'm going to focus on the residuals that are the most polarizing, since those may indicate strong areas where ER usage differs between groups and where interventions need to be focused.
+  - Non-Hispanic Black patients (11.87) and Hispanic patients (8.89) both had a strong positive pearson residual when it came to their usage of Medicaid/CHIP. This implies that they're both over-represented in Medicaid/CHIP programs. 
+  - Non-Hispanic Black patients and Hispanic patients both also had a strong negative pearson residual when it came to their usage of Medicare and having private insurance. For Non-Hispanic Black patients they had a pearson residual of -9.28 when looking at their usage of private insurance and -7.21 when looking at their usage of Medicare. For Hispanic patients they had a pearson residual of -5.42 when looking at their usage of private insurance and -8.21 when looking at their usage of Medicare. This implies that they're both under-represented in having access to Medicare and private insurance. 
+  - Hispanic patients also had a strong positive pearson residual of 7.52 when looking at their usage of self-paying when going to the ER. This indicates that they're more reliant on paying out of pocket compared to other ethnicities.  
+  - Similar to the results of above, white patients are under-represented in their usage of Medicaid/CHIP and over-represented in their usage of private insurance and Medicare.
+```{r}
+#Chi Square: Ethnicity x Insurance Status
+e_is <- chisq.test(eXi)
+e_is
+
+#Pearson Residuals: Ethnicity x Insurance Status
+pearson_residuals_eis <- e_is$residuals
+print(round(pearson_residuals_eis, 2))
+
+corrplot(e_is$residuals, is.corr = FALSE)
+```
+**Association by Immediacy to be Seen and Insurance Status:**
+- This Chi-Square test was conducted to observe the association between a patients  insurance status and the immediacy in which they're seen. The results revealed a significant relationship between insurance status and the immediacy in which a patient is seen, Χ2 (49, N = 10,695) = 1061.6, p = < 2.2e-16. 
+- 
+```{r}
+#Chi Square: Immediacy to be Seen x Insurance Status
+imm_is <- chisq.test(iXi)
+imm_is
+#Pearson Residuals: Immediacy to be Seen x Insurance Status
+pearson_residuals_immis <- imm_is$residuals
+print(round(pearson_residuals_immis, 2))
+
+corrplot(imm_is$residuals, is.corr = FALSE)
+```
+**Association by Immediacy to be Seen and Race:**
+- This Chi-Square test was conducted to observe the association between a patients  insurance status and the immediacy in which they're seen. The results revealed a significant relationship between insurance status and the immediacy in which a patient is seen, Χ2 (35, N = 10,695) = 175.52, p = < 2.2e-16. 
+- Black/African American patients and American Indian/Alaska Native patients are over-represented in patients who have an unknown immediacy status when considering the immediacy to be seen. Black/African American patients had a pearson residual of 4.08 and American Indian patients had a pearson residual of 4.39. This may suggest potential documentation gaps or inconsistent triage protocols that affect these populations.
+- Black/African American patients are also under-represented in patients who are not triaged upon entering the ER (pearson residual: -5.31); however, they're over-represented in patients who go to an ER with an ESA that does not triage (pearson residual: 3.36). This may suggest that Black/African American patients frequently visit hospitals that don't triage which may provide insight on the type of hospitals in predominantly black areas and their ability to triage patients upon arrival.
+- White patients are over-represented in patients who aren't triaged or are triaged as a patient who needs to be seen urgently. The reasons are unclear, this may reflect either a triage protocol pattern, access-related differences, or healthcare-seeking behaviors. More research will need to be done to explore the reasoning for this.
+- It's also important to note that Asian patients are over-represented in multiple triage categories (i.e. No Triage, Immediate, Emergent, Urgent). This is something that's worth exploring in the future to see what contributes to that. 
+```{r}
+#Chi Square: Immediacy to be Seen x Race
+race_is <- chisq.test(rXi)
+race_is
+
+#Pearson Residuals: Immediacy to be Seen x Race
+pearson_residuals_raceis <- race_is$residuals
+print(round(pearson_residuals_raceis, 2))
+
+corrplot(race_is$residuals, is.corr = FALSE)
+```
+
+## 4. Equity Implications
+
+# Recommendations
+-   Equity-focused Interventions
+-   Future Data Needs
